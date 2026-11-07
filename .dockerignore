@@ -1,0 +1,26 @@
+# Credenciales: nunca deben entrar a la imagen
+.env
+.env.*
+!.env.example
+
+# Control de versiones
+.git
+.gitignore
+
+# Notebooks y scripts de apoyo (no se usan en produccion)
+notebooks/
+scripts/
+.ipynb_checkpoints/
+
+# Caches y entornos de Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Otros archivos que la app no necesita
+.devcontainer/
+pruebas.http
+README.md
+Dockerfile
+.dockerignore
