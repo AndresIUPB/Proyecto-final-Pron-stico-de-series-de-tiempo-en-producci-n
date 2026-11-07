@@ -2,62 +2,1435 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pronóstico</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#050814">
+<title>Kairo · Predictive Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 <!--
-  ESQUELETO DEL FRONTEND
-  ======================
-  Esta página ya funciona: pide el pronóstico a la API y lo muestra en una
-  tabla sin formato. Tu trabajo es convertirla en una interfaz de verdad.
+  Kairo · Predictive Analytics
+  Frontend de la plataforma de pronóstico SARIMA (FastAPI + InfluxDB 2.x).
 
-  Requisitos mínimos (ver README, Fase 2):
-    1. Una gráfica con el histórico, el pronóstico y el intervalo de confianza.
-    2. Las horas en hora de Colombia (la API las entrega en UTC, con "Z").
-    3. Al menos un indicador destacado (p.ej. valor de la próxima hora,
-       máximo esperado, hora del último dato).
-    4. Controles para elegir cuántas horas pronosticar.
-    5. Un mensaje claro cuando la API responde con error.
-
-  Puedes usar cualquier librería de gráficas cargada desde un CDN
-  (Chart.js, Plotly, ECharts...) y poner archivos .css o .js en esta misma
-  carpeta: se sirven en /static/<nombre>.
-
-  Endpoints disponibles (pruébalos en /docs):
+  Endpoints consumidos (sin modificar):
     GET /api/prediccion?horas=12&historia=48&confianza=0.95
-    GET /api/historico?horas=48
+    GET /api/historico?horas=48     (respaldo: solo si el pronóstico falla)
     GET /api/modelo
     GET /api/salud
+
+  Todas las fechas llegan en UTC (sufijo "Z") y se muestran en America/Bogota.
 -->
+<style>
+:root{
+  --bg:#050814;
+  --bg-2:#0a0f1f;
+  --surface:rgba(255,255,255,.035);
+  --surface-2:rgba(255,255,255,.055);
+  --surface-solid:#0c1224;
+  --border:rgba(255,255,255,.075);
+  --border-strong:rgba(255,255,255,.13);
+  --text:#e8ecf4;
+  --text-2:#9aa3b8;
+  --text-3:#646d84;
+  --blue:#4f8cff;
+  --cyan:#22d3ee;
+  --violet:#a78bfa;
+  --green:#34d399;
+  --amber:#fbbf24;
+  --red:#f87171;
+  --radius:20px;
+  --radius-sm:12px;
+  --shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 20px 50px -20px rgba(0,0,0,.6);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Inter","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;min-height:100vh;font-family:var(--font);color:var(--text);
+  background:var(--bg);font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  overflow-x:hidden;
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background:
+    radial-gradient(900px 500px at 12% -10%,rgba(79,140,255,.16),transparent 60%),
+    radial-gradient(700px 420px at 92% 0%,rgba(167,139,250,.11),transparent 60%),
+    radial-gradient(800px 600px at 50% 110%,rgba(34,211,238,.06),transparent 60%),
+    linear-gradient(180deg,#050814 0%,#060a18 100%);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.35;
+  background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 70%);
+  mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 70%);
+}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
+
+/* ---------- Barra superior ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(5,8,20,.72);
+  -webkit-backdrop-filter:saturate(160%) blur(20px);backdrop-filter:saturate(160%) blur(20px);
+  border-bottom:1px solid var(--border);
+}
+.topbar-inner{max-width:1360px;margin:0 auto;padding:12px 28px;display:flex;align-items:center;gap:18px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand-mark{width:32px;height:32px;border-radius:9px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(135deg,#3b6cff 0%,#22d3ee 55%,#a78bfa 100%);box-shadow:0 6px 18px -6px rgba(79,140,255,.6)}
+.brand-mark svg{width:20px;height:20px;stroke:#fff;stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.brand-name{font-weight:650;font-size:17px;letter-spacing:-.01em}
+.module-tag{font-size:12px;font-weight:550;color:var(--text-2);padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);white-space:nowrap}
+.topbar-status{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;font-size:12.5px;
+  border:1px solid var(--border);background:var(--surface);color:var(--text-2);white-space:nowrap}
+.pill b{color:var(--text);font-weight:550}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--text-3);flex:none;position:relative}
+.dot.ok{background:var(--green);box-shadow:0 0 0 3px rgba(52,211,153,.15)}
+.dot.warn{background:var(--amber);box-shadow:0 0 0 3px rgba(251,191,36,.15)}
+.dot.err{background:var(--red);box-shadow:0 0 0 3px rgba(248,113,113,.15)}
+.dot.wait{background:var(--text-3);animation:blink 1.2s ease-in-out infinite}
+@keyframes blink{50%{opacity:.35}}
+.icon-btn{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:10px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text-2);cursor:pointer;transition:background .2s,color .2s,border-color .2s,transform .1s}
+.icon-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--border-strong)}
+.icon-btn:active{transform:scale(.95)}
+.icon-btn.spin svg{animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- Layout ---------- */
+main{max-width:1360px;margin:0 auto;padding:28px 28px 56px}
+section{margin-top:22px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);position:relative}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:22px 24px 0}
+.card-title{display:flex;align-items:center;gap:10px;font-size:15.5px;font-weight:600;letter-spacing:-.01em;margin:0}
+.card-title svg{color:var(--text-2)}
+.card-sub{color:var(--text-3);font-size:13px;margin:4px 0 0}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+
+/* ---------- Overview ---------- */
+.overview{display:grid;grid-template-columns:1fr 360px;gap:22px;margin-top:6px}
+.hero{padding:30px 32px;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-80px;top:-80px;width:320px;height:320px;border-radius:50%;
+  background:radial-gradient(circle,rgba(79,140,255,.18),transparent 70%);pointer-events:none}
+.hero .eyebrow{display:flex;align-items:center;gap:8px;color:var(--cyan)}
+.hero h1{font-size:clamp(30px,4vw,44px);line-height:1.08;letter-spacing:-.03em;font-weight:700;margin:12px 0 10px;
+  background:linear-gradient(180deg,#fff 0%,#c7d2ea 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.lead{color:var(--text-2);max-width:640px;margin:0;font-size:15.5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;padding:6px 11px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-2)}
+.chip b{color:var(--text);font-weight:550;font-family:var(--mono);font-size:12px}
+.clock-card{padding:24px 26px;display:flex;flex-direction:column;justify-content:space-between;gap:18px}
+.clock-time{font-size:40px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.clock-date{color:var(--text-2);font-size:14px;margin-top:8px}
+.avail{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid var(--border)}
+.avail .dot{margin-top:7px}
+.avail strong{display:block;font-size:13.5px;font-weight:600}
+.avail span{display:block;font-size:12.5px;color:var(--text-2);margin-top:2px}
+
+/* ---------- Lectura rápida ---------- */
+.insight{display:flex;gap:16px;align-items:flex-start;padding:18px 22px;
+  background:linear-gradient(90deg,rgba(79,140,255,.09),rgba(167,139,250,.05) 60%,rgba(255,255,255,.02));}
+.insight-icon{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;flex:none;
+  background:rgba(79,140,255,.14);color:#9cc0ff;border:1px solid rgba(79,140,255,.25)}
+.insight h2{font-size:13px;margin:0 0 4px;font-weight:600;color:var(--text-2);letter-spacing:.02em}
+.insight p{margin:0;font-size:15px;color:var(--text);max-width:1050px}
+.insight p em{font-style:normal;color:#9cc0ff;font-weight:550}
+
+/* ---------- KPI ---------- */
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px}
+.kpi{padding:20px;display:flex;flex-direction:column;gap:12px;min-height:168px;transition:border-color .25s,transform .25s}
+.kpi:hover{border-color:var(--border-strong);transform:translateY(-2px)}
+.kpi-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.kpi-name{font-size:12.5px;color:var(--text-2);font-weight:550}
+.kpi-ico{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;border:1px solid var(--border)}
+.kpi-ico.blue{color:#8db4ff;background:rgba(79,140,255,.1)}
+.kpi-ico.cyan{color:#67e8f9;background:rgba(34,211,238,.1)}
+.kpi-ico.violet{color:#c4b5fd;background:rgba(167,139,250,.1)}
+.kpi-ico.green{color:#6ee7b7;background:rgba(52,211,153,.1)}
+.kpi-ico.amber{color:#fcd34d;background:rgba(251,191,36,.1)}
+.kpi-value{font-size:30px;font-weight:650;letter-spacing:-.025em;line-height:1.05;word-break:break-word}
+.kpi-value.sm{font-size:22px}
+.kpi-desc{font-size:12.5px;color:var(--text-3);margin-top:auto}
+.kpi-desc b{color:var(--text-2);font-weight:550}
+.delta{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px}
+.delta.up{color:#fca5a5;background:rgba(248,113,113,.1)}
+.delta.down{color:#6ee7b7;background:rgba(52,211,153,.1)}
+.delta.flat{color:var(--text-2);background:rgba(255,255,255,.06)}
+.spark{height:28px;width:100%;display:block}
+
+/* Skeleton */
+.sk{position:relative;overflow:hidden;border-radius:8px;background:rgba(255,255,255,.06);color:transparent!important;user-select:none}
+.sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent);animation:shimmer 1.4s infinite}
+@keyframes shimmer{to{transform:translateX(100%)}}
+.sk-line{display:block;height:12px;margin:8px 0}
+
+/* ---------- Gráfica + controles ---------- */
+.forecast-card{overflow:hidden}
+.progress{position:absolute;left:0;top:0;height:2px;width:100%;overflow:hidden;opacity:0;transition:opacity .2s;z-index:3}
+.progress.on{opacity:1}
+.progress::before{content:"";position:absolute;inset:0;width:40%;background:linear-gradient(90deg,transparent,var(--cyan),var(--blue),transparent);animation:bar 1.1s ease-in-out infinite}
+@keyframes bar{from{transform:translateX(-100%)}to{transform:translateX(260%)}}
+.controls{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px;padding:18px 24px 0}
+.ctrl{padding:14px 16px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid var(--border)}
+.ctrl-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:8px}
+.ctrl-label{font-size:12.5px;color:var(--text-2);font-weight:550}
+.ctrl-value{font-size:13px;font-weight:600;color:var(--text)}
+.seg{display:flex;gap:4px;padding:3px;border-radius:11px;background:rgba(0,0,0,.25);border:1px solid var(--border)}
+.seg button{flex:1;border:0;background:transparent;color:var(--text-2);font-size:12.5px;font-weight:550;padding:7px 4px;border-radius:8px;cursor:pointer;transition:background .2s,color .2s;white-space:nowrap}
+.seg button:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.seg button[aria-pressed="true"]{background:linear-gradient(180deg,rgba(79,140,255,.35),rgba(79,140,255,.2));color:#fff;box-shadow:0 0 0 1px rgba(79,140,255,.45) inset}
+.seg button:active{transform:scale(.97)}
+.range-row{display:flex;align-items:center;gap:12px;margin-top:12px}
+.range-row span{font-size:11.5px;color:var(--text-3)}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:4px;outline:none;cursor:pointer;
+  background:linear-gradient(90deg,var(--blue) 0%,var(--cyan) var(--p,15%),rgba(255,255,255,.1) var(--p,15%))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:0;box-shadow:0 0 0 4px rgba(79,140,255,.3),0 2px 6px rgba(0,0,0,.4)}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#fff;border:0;box-shadow:0 0 0 4px rgba(79,140,255,.3)}
+.chart-wrap{position:relative;padding:8px 10px 6px}
+#chart{width:100%;height:460px}
+.chart-overlay{position:absolute;inset:8px 24px 16px;display:none;place-items:center;text-align:center;z-index:2}
+.chart-overlay.show{display:grid}
+.state-box{max-width:460px;padding:24px}
+.state-box .state-ico{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;margin:0 auto 14px;border:1px solid var(--border);background:var(--surface-2)}
+.state-box.err .state-ico{color:var(--red);background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.25)}
+.state-box h3{margin:0 0 6px;font-size:16px;font-weight:600}
+.state-box p{margin:0;color:var(--text-2);font-size:13.5px}
+.btn{display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:9px 16px;border-radius:11px;cursor:pointer;
+  border:1px solid rgba(79,140,255,.4);background:rgba(79,140,255,.15);color:#dbe7ff;font-size:13px;font-weight:600;transition:background .2s,transform .1s}
+.btn:hover{background:rgba(79,140,255,.25)}
+.btn:active{transform:scale(.97)}
+.btn.ghost{border-color:var(--border);background:var(--surface);color:var(--text-2)}
+.btn.ghost:hover{color:var(--text);background:var(--surface-2)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.banner{margin:14px 24px 0;padding:11px 14px;border-radius:12px;font-size:13px;display:none;gap:10px;align-items:flex-start}
+.banner.show{display:flex}
+.banner.warn{background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.22);color:#fde68a}
+.banner.err{background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.25);color:#fecaca}
+.banner svg{margin-top:1px}
+.chart-foot{display:flex;flex-wrap:wrap;gap:8px 22px;padding:4px 24px 20px;font-size:12px;color:var(--text-3)}
+.chart-foot b{color:var(--text-2);font-weight:550}
+
+/* ---------- Tabla + modelo ---------- */
+.split{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:22px;align-items:start}
+.table-wrap{padding:16px 12px 12px;max-height:560px;overflow:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 4px;font-size:13.5px}
+thead th{position:sticky;top:0;z-index:1;background:var(--surface-solid);text-align:right;font-size:11.5px;font-weight:600;color:var(--text-3);
+  text-transform:uppercase;letter-spacing:.06em;padding:10px 14px;border-bottom:1px solid var(--border)}
+thead th:first-child{text-align:left;border-radius:10px 0 0 10px}
+thead th:last-child{border-radius:0 10px 10px 0}
+tbody td{padding:11px 14px;text-align:right;background:rgba(255,255,255,.022);border-top:1px solid transparent;border-bottom:1px solid transparent}
+tbody tr td:first-child{text-align:left;border-radius:10px 0 0 10px}
+tbody tr td:last-child{border-radius:0 10px 10px 0}
+tbody tr.row:hover td{background:rgba(79,140,255,.07)}
+tbody tr.day td{background:transparent;text-align:left;font-size:11.5px;font-weight:600;color:var(--text-3);letter-spacing:.03em;padding:12px 14px 2px}
+.t-hour{font-weight:600}
+.t-date{display:block;font-size:11.5px;color:var(--text-3)}
+.t-pred{font-weight:650;color:#a5f3fc}
+.t-bound{color:var(--text-2)}
+.badge{display:inline-block;margin-left:8px;font-size:10.5px;font-weight:650;padding:2px 7px;border-radius:6px;vertical-align:middle;letter-spacing:.02em}
+.badge.max{background:rgba(167,139,250,.15);color:#ddd6fe}
+.badge.first{background:rgba(34,211,238,.12);color:#a5f3fc}
+.rangebar{position:relative;height:6px;border-radius:6px;background:rgba(255,255,255,.06);min-width:90px}
+.rangebar i{position:absolute;top:0;bottom:0;border-radius:6px;background:linear-gradient(90deg,rgba(34,211,238,.25),rgba(34,211,238,.45))}
+.rangebar s{position:absolute;top:-3px;width:2px;height:12px;border-radius:2px;background:#e0f7ff;text-decoration:none}
+.empty{padding:40px 20px;text-align:center;color:var(--text-3);font-size:13.5px}
+
+.model-body{padding:18px 24px 24px;display:flex;flex-direction:column;gap:18px}
+.model-formula{font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:-.01em;padding:16px 18px;border-radius:14px;
+  background:linear-gradient(135deg,rgba(79,140,255,.1),rgba(167,139,250,.08));border:1px solid rgba(79,140,255,.2);color:#dbe7ff;overflow-x:auto;white-space:nowrap}
+.model-formula small{display:block;font-family:var(--font);font-size:12px;font-weight:500;color:var(--text-2);margin-top:4px;white-space:normal}
+.orders{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.ord{text-align:center;padding:9px 4px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--border)}
+.ord b{display:block;font-size:17px;font-weight:650}
+.ord span{display:block;font-size:10.5px;color:var(--text-3);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ord.s{border-color:rgba(167,139,250,.3);background:rgba(167,139,250,.07)}
+.sub-h{font-size:11.5px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.metric{padding:12px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid var(--border)}
+.metric span{display:block;font-size:11.5px;color:var(--text-3);font-weight:550}
+.metric b{display:block;font-size:19px;font-weight:650;margin-top:2px}
+.metric small{display:block;font-size:11px;color:var(--text-3);margin-top:2px;line-height:1.35}
+dl.kv{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px}
+dl.kv dt{color:var(--text-3)}
+dl.kv dd{margin:0;text-align:right;color:var(--text);word-break:break-word}
+.muted-note{font-size:12.5px;color:var(--text-3);padding:12px 14px;border-radius:12px;border:1px dashed var(--border-strong)}
+
+/* ---------- Estado del sistema ---------- */
+.health-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;padding:18px 24px 22px}
+.hcell{padding:16px;border-radius:14px;background:rgba(255,255,255,.025);border:1px solid var(--border);display:flex;flex-direction:column;gap:10px;min-width:0}
+.hcell-top{display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:12.5px;font-weight:550}
+.hcell-val{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
+.hcell-val code{font-family:var(--mono);font-size:13px;font-weight:500;word-break:break-all}
+.hcell p{margin:0;font-size:12px;color:var(--text-3);line-height:1.45}
+
+footer{max-width:1360px;margin:0 auto;padding:0 28px 36px;color:var(--text-3);font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+/* ---------- Animaciones ---------- */
+.reveal{opacity:0;transform:translateY(10px);animation:reveal .6s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes reveal{to{opacity:1;transform:none}}
+.fade-num{animation:fadenum .45s ease}
+@keyframes fadenum{from{opacity:.2;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+/* ---------- Responsive ---------- */
+@media (max-width:1200px){
+  .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .health-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:1024px){
+  .overview{grid-template-columns:1fr}
+  .split{grid-template-columns:1fr}
+  .controls{grid-template-columns:1fr 1fr}
+  .controls .ctrl:first-child{grid-column:1/-1}
+  .pill.hide-md{display:none}
+}
+@media (max-width:720px){
+  .topbar-inner{padding:10px 16px;gap:10px}
+  .module-tag{display:none}
+  .pill{padding:5px 9px;font-size:12px}
+  .pill .lbl{display:none}
+  main{padding:18px 14px 40px}
+  .hero{padding:24px 20px}
+  .kpis{grid-template-columns:1fr 1fr;gap:10px}
+  .kpi{padding:16px;min-height:150px}
+  .kpi-value{font-size:24px}
+  .kpis .kpi:last-child{grid-column:1/-1}
+  .controls{grid-template-columns:1fr;padding:14px 14px 0}
+  .card-head{padding:18px 16px 0}
+  #chart{height:360px}
+  .chart-foot{padding:4px 16px 16px}
+  .banner{margin:12px 14px 0}
+  .health-grid{grid-template-columns:1fr 1fr;padding:14px}
+  .orders{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .model-body{padding:16px}
+  /* Tabla como tarjetas */
+  .table-wrap{padding:10px;max-height:none}
+  table,thead,tbody,tr,td{display:block;width:100%}
+  thead{display:none}
+  tbody tr.row{margin-bottom:8px;border-radius:12px;background:rgba(255,255,255,.025);border:1px solid var(--border);padding:6px 4px}
+  tbody tr.row td{background:transparent!important;display:flex;justify-content:space-between;gap:12px;padding:6px 12px;text-align:right}
+  tbody tr.row td::before{content:attr(data-label);color:var(--text-3);font-size:12px;text-align:left}
+  tbody tr.row td:first-child::before{content:none}
+  tbody tr.row td.td-bar{display:none}
+}
+@media (max-width:440px){
+  .health-grid{grid-template-columns:1fr}
+  .kpis{grid-template-columns:1fr}
+  .seg button{font-size:12px;padding:7px 2px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+</style>
 </head>
 <body>
-  <h1>Pronóstico</h1>
-  <p id="estado">Consultando la API…</p>
-  <table border="1" cellpadding="4">
-    <thead><tr><th>tiempo (UTC)</th><th>prediccion</th><th>limite_inferior</th><th>limite_superior</th></tr></thead>
-    <tbody id="filas"></tbody>
-  </table>
+
+<!-- ================= BARRA SUPERIOR ================= -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 15c2.5 0 3-6 5.5-6S11 17 13.5 17 16 7 18.5 7 21 11 21 11"/></svg></div>
+      <span class="brand-name">Kairo</span>
+      <span class="module-tag">Predictive Analytics</span>
+    </div>
+    <div class="topbar-status" aria-live="polite">
+      <span class="pill" id="pillApi" title="Estado de /api/salud"><span class="dot wait"></span><span class="lbl">API</span> <b>Verificando</b></span>
+      <span class="pill" id="pillModel" title="Estado del modelo predictivo"><span class="dot wait"></span><span class="lbl">Modelo</span> <b>Verificando</b></span>
+      <span class="pill hide-md" id="pillData" title="Último registro real disponible (hora de Colombia)"><span class="dot wait"></span><span class="lbl">Último dato</span> <b>Sin consultar</b></span>
+      <button class="icon-btn" id="btnRefresh" type="button" aria-label="Actualizar datos" title="Actualizar datos"><span data-icon="refresh"></span></button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ================= OVERVIEW ================= -->
+  <section class="overview" aria-labelledby="ovTitle">
+    <div class="card hero reveal">
+      <div class="eyebrow"><span data-icon="activity"></span> Monitoreo de sensor · <span id="ovMeasurement">Server</span></div>
+      <h1 id="ovTitle">Consumo total</h1>
+      <p class="lead">Kairo combina el histórico del sensor almacenado en InfluxDB con un modelo SARIMA para estimar cómo se comportará el consumo en las próximas horas, con un intervalo de confianza que indica qué tan segura es cada estimación.</p>
+      <div class="chips">
+        <span class="chip">Measurement <b id="chipMeasurement">Server</b></span>
+        <span class="chip">Field <b id="chipField">Consumo_total</b></span>
+        <span class="chip">Bucket <b>Consumo_elec</b></span>
+        <span class="chip">Modelo <b id="chipModel">SARIMA</b></span>
+      </div>
+    </div>
+    <div class="card clock-card reveal" style="animation-delay:.06s">
+      <div>
+        <div class="eyebrow">Hora de Colombia · UTC-5</div>
+        <div class="clock-time num" id="clockTime">--:--:--</div>
+        <div class="clock-date" id="clockDate">&nbsp;</div>
+      </div>
+      <div class="avail" id="availBox" aria-live="polite">
+        <span class="dot wait"></span>
+        <div><strong>Consultando disponibilidad</strong><span>Solicitando el pronóstico a la API.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= LECTURA RÁPIDA ================= -->
+  <section>
+    <div class="card insight reveal" style="animation-delay:.1s" aria-live="polite">
+      <div class="insight-icon"><span data-icon="sparkles"></span></div>
+      <div style="flex:1;min-width:0">
+        <h2>Lectura rápida</h2>
+        <p id="insightText"><span class="sk sk-line" style="width:80%"></span><span class="sk sk-line" style="width:55%"></span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= KPI ================= -->
+  <section aria-label="Indicadores clave">
+    <div class="kpis">
+      <article class="card kpi reveal" style="animation-delay:.12s">
+        <div class="kpi-top"><span class="kpi-name">Último consumo registrado</span><span class="kpi-ico blue"><span data-icon="zap"></span></span></div>
+        <div class="kpi-value num" id="kLast"><span class="sk">000,00</span></div>
+        <svg class="spark" id="kSpark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="kpi-desc" id="kLastDesc">Promedio horario más reciente.</div>
+      </article>
+      <article class="card kpi reveal" style="animation-delay:.16s">
+        <div class="kpi-top"><span class="kpi-name">Próximo consumo estimado</span><span class="kpi-ico cyan"><span data-icon="trend"></span></span></div>
+        <div class="kpi-value num" id="kNext"><span class="sk">000,00</span></div>
+        <div class="kpi-desc" id="kNextDesc">Primera hora del pronóstico.</div>
+      </article>
+      <article class="card kpi reveal" style="animation-delay:.2s">
+        <div class="kpi-top"><span class="kpi-name">Máximo pronosticado</span><span class="kpi-ico violet"><span data-icon="peak"></span></span></div>
+        <div class="kpi-value num" id="kMax"><span class="sk">000,00</span></div>
+        <div class="kpi-desc" id="kMaxDesc">Valor más alto del horizonte.</div>
+      </article>
+      <article class="card kpi reveal" style="animation-delay:.24s">
+        <div class="kpi-top"><span class="kpi-name">Variación esperada</span><span class="kpi-ico green"><span data-icon="percent"></span></span></div>
+        <div class="kpi-value num" id="kVar"><span class="sk">+0,0 %</span></div>
+        <div class="kpi-desc" id="kVarDesc">Próxima hora frente al último dato real.</div>
+      </article>
+      <article class="card kpi reveal" style="animation-delay:.28s">
+        <div class="kpi-top"><span class="kpi-name">Última observación</span><span class="kpi-ico amber"><span data-icon="clock"></span></span></div>
+        <div class="kpi-value sm num" id="kObs"><span class="sk">00 nov, 0:00</span></div>
+        <div class="kpi-desc" id="kObsDesc">Fecha y hora del último registro real.</div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= GRÁFICA + CONTROLES ================= -->
+  <section aria-labelledby="fcTitle">
+    <div class="card forecast-card reveal" style="animation-delay:.3s">
+      <div class="progress" id="progress" aria-hidden="true"></div>
+      <div class="card-head">
+        <div>
+          <h2 class="card-title" id="fcTitle"><span data-icon="chart"></span> Pronóstico de consumo</h2>
+          <p class="card-sub" id="fcSub">Histórico real, pronóstico SARIMA e intervalo de confianza en hora de Colombia.</p>
+        </div>
+        <button class="btn ghost" type="button" id="btnResetZoom" style="margin-top:0" title="Restablecer el zoom de la gráfica"><span data-icon="maximize"></span> Vista completa</button>
+      </div>
+
+      <div class="controls" role="group" aria-label="Parámetros del pronóstico">
+        <div class="ctrl">
+          <div class="ctrl-head"><span class="ctrl-label" id="lblH">Horizonte de pronóstico</span><span class="ctrl-value num" id="valH">12 horas</span></div>
+          <div class="seg" id="segH" aria-labelledby="lblH">
+            <button type="button" data-v="6">6 h</button><button type="button" data-v="12">12 h</button><button type="button" data-v="24">24 h</button><button type="button" data-v="48">48 h</button><button type="button" data-v="72">72 h</button>
+          </div>
+          <div class="range-row"><span>1 h</span><input type="range" id="rangeH" min="1" max="72" step="1" value="12" aria-label="Horas a pronosticar"><span>72 h</span></div>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-head"><span class="ctrl-label" id="lblHist">Historia visible</span><span class="ctrl-value num" id="valHist">48 horas</span></div>
+          <div class="seg" id="segHist" aria-labelledby="lblHist">
+            <button type="button" data-v="24">1 d</button><button type="button" data-v="48">2 d</button><button type="button" data-v="72">3 d</button><button type="button" data-v="168">7 d</button><button type="button" data-v="336">14 d</button>
+          </div>
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-head"><span class="ctrl-label" id="lblConf">Nivel de confianza</span><span class="ctrl-value num" id="valConf">95 %</span></div>
+          <div class="seg" id="segConf" aria-labelledby="lblConf">
+            <button type="button" data-v="0.8">80 %</button><button type="button" data-v="0.9">90 %</button><button type="button" data-v="0.95">95 %</button><button type="button" data-v="0.99">99 %</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="banner" id="chartBanner" role="status"></div>
+
+      <div class="chart-wrap">
+        <div id="chart" role="img" aria-label="Gráfica del histórico y del pronóstico de consumo total"></div>
+        <div class="chart-overlay" id="chartOverlay"></div>
+      </div>
+      <div class="chart-foot" id="chartFoot"></div>
+    </div>
+  </section>
+
+  <!-- ================= TABLA + MODELO ================= -->
+  <section class="split">
+    <div class="card reveal" style="animation-delay:.34s">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title"><span data-icon="table"></span> Tabla de predicciones</h2>
+          <p class="card-sub" id="tblSub">Valores horarios del pronóstico en hora de Colombia.</p>
+        </div>
+        <button class="btn ghost" type="button" id="btnCsv" style="margin-top:0" disabled><span data-icon="download"></span> CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Fecha y hora</th><th scope="col">Pronóstico</th><th scope="col">Límite inferior</th><th scope="col">Límite superior</th><th scope="col" class="td-bar" style="text-align:left">Intervalo</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card reveal" style="animation-delay:.38s">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title"><span data-icon="cpu"></span> Información del modelo</h2>
+          <p class="card-sub">Metadatos reportados por <code>/api/modelo</code>.</p>
+        </div>
+      </div>
+      <div class="model-body" id="modelBody">
+        <span class="sk sk-line" style="height:58px"></span>
+        <span class="sk sk-line" style="height:48px"></span>
+        <span class="sk sk-line" style="height:70px"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ESTADO DEL SISTEMA ================= -->
+  <section aria-labelledby="hTitle">
+    <div class="card reveal" style="animation-delay:.42s">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title" id="hTitle"><span data-icon="server"></span> Estado del sistema</h2>
+          <p class="card-sub" id="hSub">Información de <code>/api/salud</code>. Se verifica cada 30 segundos.</p>
+        </div>
+        <button class="btn ghost" type="button" id="btnHealth" style="margin-top:0"><span data-icon="refresh"></span> Verificar</button>
+      </div>
+      <div class="health-grid" id="healthGrid" aria-live="polite"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>Kairo · Predictive Analytics · SARIMA sobre InfluxDB 2.x · FastAPI</span>
+  <span>Todas las horas se muestran en hora de Colombia (America/Bogota).</span>
+</footer>
 
 <script>
-async function cargar() {
-  const estado = document.getElementById("estado");
+"use strict";
+/* =====================================================================
+   Configuración
+   ===================================================================== */
+const API = {
+  prediccion: "/api/prediccion",
+  historico:  "/api/historico",
+  modelo:     "/api/modelo",
+  salud:      "/api/salud",
+};
+const TZ = "America/Bogota";
+const LOCALE = "es-CO";
+const HEALTH_INTERVAL_MS = 30000;
+
+const state = {
+  horas: 12, historia: 48, confianza: 0.95,
+  datos: null,          // última respuesta válida de /api/prediccion
+  modoSoloHistorico: false,
+  salud: null, saludError: null, saludLatencia: null, saludRevisada: null,
+  modelo: null, modeloError: null,
+  ultimaConsulta: null, // instante de la última respuesta de datos correcta
+  errorDatos: null,
+};
+
+/* =====================================================================
+   Iconos (SVG en línea, sin dependencias)
+   ===================================================================== */
+const ICONS = {
+  refresh:'<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
+  activity:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  sparkles:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/>',
+  zap:'<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  trend:'<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
+  peak:'<path d="m8 3 4 8 5-5 5 15H2z"/>',
+  percent:'<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  chart:'<path d="M3 3v18h18"/><path d="m7 15 4-5 4 3 5-7"/>',
+  maximize:'<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  table:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  cpu:'<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  server:'<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/>',
+  database:'<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/>',
+  box:'<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  layers:'<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  alert:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/>',
+  wifiOff:'<path d="M2 2l20 20"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-2.3-1.6"/><path d="M12 20h.01"/>',
+  arrowUp:'<path d="M7 17 17 7M8 7h9v9"/>',
+  arrowDown:'<path d="M7 7l10 10M17 8v9H8"/>',
+  minus:'<path d="M5 12h14"/>',
+};
+function icon(name, size){
+  const s = size ? ` style="width:${size}px;height:${size}px"` : "";
+  return `<svg class="i" viewBox="0 0 24 24"${s} aria-hidden="true">${ICONS[name] || ""}</svg>`;
+}
+function hydrateIcons(root = document){
+  root.querySelectorAll("[data-icon]").forEach(el => {
+    el.outerHTML = icon(el.getAttribute("data-icon"), el.getAttribute("data-size"));
+  });
+}
+
+/* =====================================================================
+   Utilidades de formato (fechas en America/Bogota, números es-CO)
+   ===================================================================== */
+const fmtNum2 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtNum1 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const fmtInt  = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+const fmtPct  = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: "exceptZero" });
+
+const dtfHour    = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: "numeric", minute: "2-digit", hour12: true });
+const dtfHourS   = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: "numeric", hour12: true });
+const dtfDayShort= new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, day: "numeric", month: "short" });
+const dtfDayLong = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: "long", day: "numeric", month: "long" });
+const dtfFull    = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+const dtfShort   = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+const dtfClock   = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+const dtfClockDate = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const dtfParts   = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hourCycle: "h23", day: "numeric", month: "numeric", year: "numeric" });
+const dtfCsv     = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** Convierte un timestamp UTC de la API ("2026-11-06T14:00:00Z") a milisegundos. */
+function parseUTC(s){
+  if (s == null) return NaN;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : NaN;
+}
+/** Fechas del JSON del modelo: "2026-10-08 02:00:00" o "2026-11-07 02:08 UTC" (ambas en UTC). */
+function parseLooseUTC(s){
+  if (typeof s !== "string") return NaN;
+  const m = s.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?\s*(?:UTC|Z)?$/i);
+  if (!m) return parseUTC(s);
+  return Date.parse(`${m[1]}T${m[2].length === 5 ? m[2] + ":00" : m[2]}Z`);
+}
+function bogotaParts(ms){
+  const o = {};
+  for (const p of dtfParts.formatToParts(new Date(ms))) o[p.type] = p.value;
+  return { hour: +o.hour, day: +o.day, month: +o.month, year: +o.year };
+}
+function dayKey(ms){ const p = bogotaParts(ms); return `${p.year}-${p.month}-${p.day}`; }
+const clean = s => String(s).replace(/\u202f|\u00a0/g, " ");
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+/** Agrega un punto final sin duplicarlo cuando el texto ya termina en "a. m." o "p. m.". */
+const fin = s => /\.$/.test(s) ? s : s + ".";
+const fHour  = ms => clean(dtfHour.format(ms));
+const fHourS = ms => clean(dtfHourS.format(ms));
+const fDay   = ms => clean(dtfDayShort.format(ms));
+const fFull  = ms => clean(dtfFull.format(ms));
+const fShort = ms => clean(dtfShort.format(ms));
+const n2 = v => Number.isFinite(v) ? fmtNum2.format(v) : "N/D";
+
+function relTime(ms){
+  const diff = Date.now() - ms;
+  if (!Number.isFinite(diff)) return "";
+  const min = Math.round(Math.abs(diff) / 60000);
+  const futuro = diff < 0;
+  let txt;
+  if (min < 1) txt = "menos de un minuto";
+  else if (min < 60) txt = `${min} min`;
+  else {
+    const h = Math.floor(min / 60), m = min % 60;
+    txt = h < 48 ? (m ? `${h} h ${m} min` : `${h} h`) : `${Math.round(h / 24)} días`;
+  }
+  return futuro ? `en ${txt}` : `hace ${txt}`;
+}
+function esc(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+const $ = id => document.getElementById(id);
+const prettyField = f => String(f || "").replace(/_/g, " ").replace(/^\w/, c => c.toUpperCase());
+
+/* =====================================================================
+   Cliente HTTP: fetch con timeout, cancelación y errores legibles
+   ===================================================================== */
+class ApiError extends Error {
+  constructor(message, status){ super(message); this.name = "ApiError"; this.status = status; }
+}
+function detalleError(detail){
+  if (!detail) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(d => d && d.msg ? `${(d.loc || []).slice(-1)[0] ?? ""}: ${d.msg}`.replace(/^: /, "") : JSON.stringify(d)).join(" · ");
+  try { return JSON.stringify(detail); } catch { return String(detail); }
+}
+function mensajePorEstado(status){
+  return ({
+    404: "La API no encontró datos para el rango solicitado.",
+    422: "La API rechazó los parámetros enviados.",
+    500: "Error interno del servidor.",
+    502: "El backend no pudo consultar InfluxDB.",
+    503: "El servicio no está disponible en este momento.",
+    504: "El servidor tardó demasiado en responder.",
+  })[status] || `Error HTTP ${status}.`;
+}
+async function fetchJSON(url, { signal, timeoutMs = 30000 } = {}){
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const onAbort = () => ctrl.abort();
+  if (signal){ if (signal.aborted) ctrl.abort(); else signal.addEventListener("abort", onAbort, { once: true }); }
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs);
   try {
-    const respuesta = await fetch("/api/prediccion?horas=12&historia=48");
-    const datos = await respuesta.json();
-    if (!respuesta.ok) throw new Error(datos.detail);
-
-    // datos.historico  -> [{tiempo, valor}, ...]            (horas pasadas)
-    // datos.prediccion -> [{tiempo, prediccion, limite_inferior, limite_superior}, ...]
-    console.log(datos);   // abre la consola del navegador (F12) para explorarlo
-
-    document.getElementById("filas").innerHTML = datos.prediccion.map(p =>
-      `<tr><td>${p.tiempo}</td><td>${p.prediccion}</td><td>${p.limite_inferior}</td><td>${p.limite_superior}</td></tr>`
-    ).join("");
-    estado.textContent = `Último dato real: ${datos.ultima_observacion}`;
-  } catch (error) {
-    estado.textContent = "Error: " + error.message;
+    let res;
+    try {
+      res = await fetch(url, { signal: ctrl.signal, cache: "no-store", headers: { Accept: "application/json" } });
+    } catch (e){
+      if (signal && signal.aborted) throw e;               // cancelada por una petición más reciente
+      if (timedOut) throw new ApiError("El servidor tardó demasiado en responder.", 0);
+      throw new ApiError("No fue posible conectar con el backend. Verifica que el servidor FastAPI esté en ejecución.", 0);
+    }
+    const texto = await res.text();
+    let cuerpo = null;
+    try { cuerpo = texto ? JSON.parse(texto) : null; } catch { cuerpo = null; }
+    if (!res.ok){
+      const det = detalleError(cuerpo && cuerpo.detail);
+      throw new ApiError(det || mensajePorEstado(res.status), res.status);
+    }
+    if (cuerpo === null) throw new ApiError("La API respondió con un formato inesperado (no es JSON).", res.status);
+    return cuerpo;
+  } catch (e){
+    if (timedOut && !(e instanceof ApiError)) throw new ApiError("El servidor tardó demasiado en responder.", 0);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
   }
 }
-cargar();
+const isAbort = e => e && (e.name === "AbortError");
+
+/* =====================================================================
+   Reloj de Colombia
+   ===================================================================== */
+function tickClock(){
+  const now = new Date();
+  $("clockTime").textContent = clean(dtfClock.format(now));
+  $("clockDate").textContent = cap(clean(dtfClockDate.format(now)));
+}
+
+/* =====================================================================
+   Controles
+   ===================================================================== */
+function syncSeg(segId, value){
+  document.querySelectorAll(`#${segId} button`).forEach(b => {
+    b.setAttribute("aria-pressed", String(Number(b.dataset.v) === Number(value)));
+  });
+}
+function syncControls(){
+  syncSeg("segH", state.horas); syncSeg("segHist", state.historia); syncSeg("segConf", state.confianza);
+  const r = $("rangeH");
+  r.value = state.horas;
+  r.style.setProperty("--p", `${((state.horas - r.min) / (r.max - r.min)) * 100}%`);
+  $("valH").textContent = `${state.horas} ${state.horas === 1 ? "hora" : "horas"}`;
+  $("valHist").textContent = state.historia >= 48 && state.historia % 24 === 0
+    ? `${state.historia} horas · ${state.historia / 24} días` : `${state.historia} horas`;
+  $("valConf").textContent = `${fmtInt.format(state.confianza * 100)} %`;
+}
+let debounceTimer = null;
+function programarCarga(inmediato){
+  clearTimeout(debounceTimer);
+  if (inmediato) cargarPrediccion();
+  else debounceTimer = setTimeout(cargarPrediccion, 350);
+}
+function initControls(){
+  const bind = (segId, key) => {
+    $(segId).addEventListener("click", e => {
+      const b = e.target.closest("button[data-v]");
+      if (!b) return;
+      const v = Number(b.dataset.v);
+      if (state[key] === v) return;
+      state[key] = v; syncControls(); programarCarga(true);
+    });
+  };
+  bind("segH", "horas"); bind("segHist", "historia"); bind("segConf", "confianza");
+  $("rangeH").addEventListener("input", e => {
+    state.horas = Number(e.target.value); syncControls(); programarCarga(false);
+  });
+  $("btnRefresh").addEventListener("click", () => { cargarPrediccion(); cargarSalud(); cargarModelo(); });
+  $("btnHealth").addEventListener("click", () => cargarSalud());
+  $("btnResetZoom").addEventListener("click", () => chart && chart.dispatchAction({ type: "dataZoom", start: 0, end: 100 }));
+  $("btnCsv").addEventListener("click", exportarCSV);
+  syncControls();
+}
+
+/* =====================================================================
+   Carga del pronóstico (con protección contra respuestas desordenadas)
+   ===================================================================== */
+let seq = 0;
+let ctrlActual = null;
+
+function setLoading(on){
+  $("progress").classList.toggle("on", on);
+  $("btnRefresh").classList.toggle("spin", on);
+  $("chart").style.opacity = on && state.datos ? ".55" : "1";
+  $("chart").style.transition = "opacity .25s";
+}
+
+function validarPrediccion(d){
+  if (!d || !Array.isArray(d.historico) || !Array.isArray(d.prediccion))
+    throw new ApiError("La respuesta de /api/prediccion no tiene la estructura esperada.", 200);
+  return d;
+}
+
+async function cargarPrediccion(){
+  const id = ++seq;
+  if (ctrlActual) ctrlActual.abort();
+  const ctrl = new AbortController();
+  ctrlActual = ctrl;
+  setLoading(true);
+  if (!state.datos) mostrarSkeletons();
+
+  const qs = new URLSearchParams({ horas: String(state.horas), historia: String(state.historia), confianza: String(state.confianza) });
+  try {
+    const datos = validarPrediccion(await fetchJSON(`${API.prediccion}?${qs}`, { signal: ctrl.signal, timeoutMs: 60000 }));
+    if (id !== seq) return;                          // llegó tarde: hay una petición más reciente
+    state.datos = datos; state.modoSoloHistorico = false;
+    state.errorDatos = null; state.ultimaConsulta = Date.now();
+    renderTodo();
+  } catch (e){
+    if (id !== seq || isAbort(e)) return;
+    state.errorDatos = e;
+    // Respaldo: si el pronóstico falla pero el backend responde, intentamos mostrar el histórico real.
+    if (e instanceof ApiError && e.status !== 0){
+      try {
+        const h = await fetchJSON(`${API.historico}?horas=${Math.max(1, state.historia)}`, { signal: ctrl.signal, timeoutMs: 45000 });
+        if (id !== seq) return;
+        if (h && Array.isArray(h.datos) && h.datos.length){
+          state.datos = { historico: h.datos, prediccion: [], horas_rellenadas: h.horas_rellenadas,
+                          ultima_observacion: h.datos[h.datos.length - 1].tiempo, confianza: state.confianza };
+          state.modoSoloHistorico = true; state.ultimaConsulta = Date.now();
+          renderTodo();
+          return;
+        }
+      } catch (e2){
+        if (id !== seq || isAbort(e2)) return;
+      }
+    }
+    if (id !== seq) return;
+    renderErrorDatos(e);
+  } finally {
+    if (id === seq){ setLoading(false); ctrlActual = null; }
+  }
+}
+
+/* =====================================================================
+   Render: KPI, lectura rápida, disponibilidad, barra superior
+   ===================================================================== */
+function mostrarSkeletons(){
+  ["kLast","kNext","kMax","kVar","kObs"].forEach(k => { $(k).innerHTML = '<span class="sk">000,00</span>'; });
+}
+function setKpi(id, html){
+  const el = $(id);
+  el.innerHTML = html;
+  el.classList.remove("fade-num"); void el.offsetWidth; el.classList.add("fade-num");
+}
+
+function calcular(d){
+  const hist = d.historico || [], pred = d.prediccion || [];
+  const last = hist.length ? hist[hist.length - 1] : null;
+  const next = pred.length ? pred[0] : null;
+  let max = null;
+  for (const p of pred) if (Number.isFinite(p.prediccion) && (!max || p.prediccion > max.prediccion)) max = p;
+  let variacion = null;
+  if (last && next && Number.isFinite(last.valor) && Number.isFinite(next.prediccion) && last.valor !== 0)
+    variacion = ((next.prediccion - last.valor) / Math.abs(last.valor)) * 100;
+  const anchos = pred.map(p => (p.limite_superior - p.limite_inferior) / 2).filter(Number.isFinite);
+  const semiAncho = anchos.length ? anchos.reduce((a, b) => a + b, 0) / anchos.length : null;
+  const media = pred.length ? pred.reduce((a, p) => a + p.prediccion, 0) / pred.length : null;
+  return { hist, pred, last, next, max, variacion, semiAncho, media };
+}
+
+function renderKPIs(d, c){
+  // 1. Último consumo
+  if (c.last){
+    setKpi("kLast", n2(c.last.valor));
+    $("kLastDesc").innerHTML = `Promedio horario de las <b>${esc(fHour(parseUTC(c.last.tiempo)))}</b>.`;
+    renderSpark(c.hist.slice(-24).map(p => p.valor));
+  } else {
+    setKpi("kLast", "N/D"); $("kLastDesc").textContent = "La API no devolvió histórico."; $("kSpark").innerHTML = "";
+  }
+  // 2. Próximo consumo
+  if (c.next){
+    setKpi("kNext", n2(c.next.prediccion));
+    $("kNextDesc").innerHTML = `Estimado para las <b>${esc(fHour(parseUTC(c.next.tiempo)))}</b> · intervalo ${n2(c.next.limite_inferior)} a ${n2(c.next.limite_superior)}`;
+  } else {
+    setKpi("kNext", "N/D"); $("kNextDesc").textContent = "Sin pronóstico disponible.";
+  }
+  // 3. Máximo
+  if (c.max){
+    setKpi("kMax", n2(c.max.prediccion));
+    $("kMaxDesc").innerHTML = `Hacia las <b>${esc(fShort(parseUTC(c.max.tiempo)))}</b> en las próximas ${c.pred.length} h.`;
+  } else {
+    setKpi("kMax", "N/D"); $("kMaxDesc").textContent = "Sin pronóstico disponible.";
+  }
+  // 4. Variación
+  if (c.variacion !== null && Number.isFinite(c.variacion)){
+    const cls = Math.abs(c.variacion) < 1 ? "flat" : c.variacion > 0 ? "up" : "down";
+    const ic  = cls === "flat" ? "minus" : cls === "up" ? "arrowUp" : "arrowDown";
+    const txt = cls === "flat" ? "Estable" : cls === "up" ? "Al alza" : "A la baja";
+    setKpi("kVar", `${fmtPct.format(c.variacion)} %`);
+    $("kVarDesc").innerHTML = `<span class="delta ${cls}">${icon(ic, 12)} ${txt}</span> próxima hora frente al último dato real.`;
+  } else {
+    setKpi("kVar", "N/D");
+    $("kVarDesc").textContent = c.last && c.last.valor === 0
+      ? "No calculable: el último valor real es 0."
+      : "Requiere un dato real y un pronóstico.";
+  }
+  // 5. Última observación
+  const tObs = parseUTC(d.ultima_observacion);
+  if (Number.isFinite(tObs)){
+    setKpi("kObs", esc(fShort(tObs)));
+    $("kObsDesc").innerHTML = `Inicio de la última hora completa · <b>${esc(relTime(tObs))}</b>`;
+  } else {
+    setKpi("kObs", "N/D"); $("kObsDesc").textContent = "Sin registro disponible.";
+  }
+}
+
+function renderSpark(vals){
+  const svg = $("kSpark");
+  const v = vals.filter(Number.isFinite);
+  if (v.length < 2){ svg.innerHTML = ""; return; }
+  const min = Math.min(...v), max = Math.max(...v), span = max - min || 1;
+  const pts = v.map((y, i) => [(i / (v.length - 1)) * 100, 26 - ((y - min) / span) * 22]);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(" ");
+  svg.innerHTML = `<defs><linearGradient id="sg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#4f8cff" stop-opacity=".35"/><stop offset="1" stop-color="#4f8cff" stop-opacity="0"/></linearGradient></defs>
+    <path d="${line} L100,28 L0,28 Z" fill="url(#sg)"/>
+    <path d="${line}" fill="none" stroke="#7aa8ff" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+}
+
+function renderInsight(d, c){
+  const el = $("insightText");
+  if (state.modoSoloHistorico){
+    el.innerHTML = `No fue posible generar el pronóstico, pero el histórico real sí está disponible. El último promedio horario registrado fue <em>${n2(c.last && c.last.valor)}</em>.`;
+    return;
+  }
+  if (!c.next){ el.textContent = "La API no devolvió valores de pronóstico para los parámetros seleccionados."; return; }
+  const partes = [];
+  let frase = `Para las <em>${esc(fHour(parseUTC(c.next.tiempo)))}</em> el modelo estima un consumo de <em>${n2(c.next.prediccion)}</em>`;
+  if (c.variacion !== null && Number.isFinite(c.variacion)){
+    frase += Math.abs(c.variacion) < 1
+      ? `, prácticamente igual al último registro real (${n2(c.last.valor)})`
+      : `, un <em>${fmtNum1.format(Math.abs(c.variacion))} %</em> ${c.variacion > 0 ? "por encima" : "por debajo"} del último registro real (${n2(c.last.valor)})`;
+  }
+  partes.push(frase + ".");
+  if (c.max && c.pred.length > 1)
+    partes.push(`En las próximas ${c.pred.length} horas el valor más alto esperado es <em>${n2(c.max.prediccion)}</em>, hacia las ${esc(fin(fShort(parseUTC(c.max.tiempo))))}`);
+  if (c.semiAncho !== null)
+    partes.push(`Con una confianza del ${fmtInt.format((d.confianza ?? state.confianza) * 100)} %, el margen promedio alrededor de cada estimación es de ±${n2(c.semiAncho)}.`);
+  el.innerHTML = partes.join(" ");
+}
+
+function renderDisponibilidad(d){
+  const box = $("availBox");
+  const rell = Number(d.horas_rellenadas) || 0;
+  const ctx = d.horas_contexto_usadas;
+  let dot = "ok", titulo = "Datos disponibles", detalle;
+  if (state.modoSoloHistorico){
+    dot = "warn"; titulo = "Solo histórico disponible";
+    detalle = "El pronóstico falló; se muestran los datos reales";
+  } else {
+    detalle = Number.isFinite(ctx) ? `${fmtInt.format(ctx)} horas de contexto enviadas al modelo` : "Pronóstico generado correctamente";
+  }
+  if (rell > 0){
+    if (dot === "ok") dot = "warn";
+    detalle += `. ${fmtInt.format(rell)} ${rell === 1 ? "hora rellenada" : "horas rellenadas"} por huecos en la serie.`;
+  } else detalle += ". Sin huecos en la serie.";
+  box.innerHTML = `<span class="dot ${dot}"></span><div><strong>${esc(titulo)}</strong><span>${esc(detalle)}</span></div>`;
+}
+
+function setPill(id, dot, label, value, title){
+  const el = $(id);
+  el.innerHTML = `<span class="dot ${dot}"></span><span class="lbl">${esc(label)}</span> <b>${esc(value)}</b>`;
+  if (title) el.title = title;
+}
+function renderPillDatos(){
+  const d = state.datos;
+  if (d && !state.errorDatos || (d && state.modoSoloHistorico)){
+    const t = parseUTC(d.ultima_observacion);
+    setPill("pillData", state.modoSoloHistorico ? "warn" : "ok", "Último dato", Number.isFinite(t) ? fShort(t) : "N/D",
+      `Último registro real: ${Number.isFinite(t) ? fFull(t) : "N/D"}. Consultado ${state.ultimaConsulta ? relTime(state.ultimaConsulta) : ""}.`);
+  } else if (state.errorDatos){
+    setPill("pillData", "err", "Datos", "Sin datos", state.errorDatos.message);
+  }
+}
+
+/* =====================================================================
+   Gráfica principal (Apache ECharts)
+   ===================================================================== */
+let chart = null;
+const C = { hist:"#4f8cff", pred:"#22d3ee", band:"rgba(34,211,238,.16)", bound:"rgba(34,211,238,.45)", grid:"rgba(255,255,255,.06)", axis:"#646d84", text:"#9aa3b8", marker:"#a78bfa" };
+
+function initChart(){
+  if (typeof echarts === "undefined"){
+    mostrarOverlay("err", "alert", "No se pudo cargar la librería de gráficas", "Revisa la conexión a internet: ECharts se carga desde un CDN (cdn.jsdelivr.net).", false);
+    return;
+  }
+  chart = echarts.init($("chart"), null, { renderer: "canvas" });
+  new ResizeObserver(() => chart && chart.resize()).observe($("chart"));
+}
+
+function mostrarOverlay(tipo, ic, titulo, texto, conBoton){
+  const ov = $("chartOverlay");
+  ov.innerHTML = `<div class="state-box ${tipo}"><div class="state-ico">${icon(ic, 22)}</div><h3>${esc(titulo)}</h3><p>${esc(texto)}</p>
+    ${conBoton ? `<button class="btn" type="button" id="btnRetry">${icon("refresh", 15)} Reintentar</button>` : ""}</div>`;
+  ov.classList.add("show");
+  const b = $("btnRetry"); if (b) b.addEventListener("click", () => cargarPrediccion());
+}
+function ocultarOverlay(){ $("chartOverlay").classList.remove("show"); }
+
+function renderChart(d, c){
+  if (!chart) return;
+  if (!c.hist.length && !c.pred.length){
+    chart.clear();
+    mostrarOverlay("", "inbox", "Sin datos para mostrar", "La API respondió correctamente, pero no hay registros para el rango seleccionado.", true);
+    return;
+  }
+  ocultarOverlay();
+
+  const confPct = fmtInt.format((d.confianza ?? state.confianza) * 100);
+  const nombreBanda = `Intervalo de confianza ${confPct} %`;
+  const histMap = new Map(), predMap = new Map();
+  const histData = c.hist.map(p => { const t = parseUTC(p.tiempo); histMap.set(t, p); return [t, p.valor]; });
+  const predData = c.pred.map(p => { const t = parseUTC(p.tiempo); predMap.set(t, p); return [t, p.prediccion]; });
+  const lowerData = c.pred.map(p => [parseUTC(p.tiempo), p.limite_inferior]);
+  const upperData = c.pred.map(p => [parseUTC(p.tiempo), p.limite_superior]);
+  const widthData = c.pred.map(p => [parseUTC(p.tiempo), p.limite_superior - p.limite_inferior]);
+
+  // Punto puente: une visualmente el último dato real con la primera predicción (no se muestra en tooltip).
+  const tLast = c.last ? parseUTC(c.last.tiempo) : NaN;
+  const predLine = (c.last && predData.length) ? [{ value: [tLast, c.last.valor], puente: true, symbol: "none" }, ...predData] : predData;
+  const tObs = parseUTC(d.ultima_observacion);
+  const tFin = predData.length ? predData[predData.length - 1][0] : NaN;
+
+  const series = [
+    { // Histórico real
+      id: "hist", name: "Histórico real", type: "line", data: histData, showSymbol: false, symbolSize: 6,
+      smooth: 0.15, z: 3, lineStyle: { width: 2.2, color: C.hist },
+      itemStyle: { color: C.hist, borderColor: "#fff", borderWidth: 1.5 },
+      emphasis: { focus: "none", scale: 1.3 },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: "rgba(79,140,255,.22)" }, { offset: 1, color: "rgba(79,140,255,0)" }]) },
+      markLine: Number.isFinite(tObs) && predData.length ? {
+        silent: true, symbol: ["none", "none"],
+        lineStyle: { color: "rgba(167,139,250,.75)", type: [4, 4], width: 1.2 },
+        label: { formatter: "Último dato real", color: "#c4b5fd", fontSize: 11, position: "insideEndTop" },
+        data: [{ xAxis: tObs }],
+      } : undefined,
+    },
+  ];
+  if (predData.length){
+    series.push(
+      { // Banda: base (límite inferior) apilada, invisible
+        id: "bandBase", name: nombreBanda, type: "line", data: lowerData, stack: "ic", stackStrategy: "all",
+        symbol: "none", lineStyle: { opacity: 0 }, silent: true, z: 1, tooltip: { show: false }, smooth: 0.15,
+      },
+      { // Banda: ancho (superior menos inferior) apilado y sombreado
+        id: "bandFill", name: nombreBanda, type: "line", data: widthData, stack: "ic", stackStrategy: "all",
+        symbol: "none", lineStyle: { opacity: 0 }, areaStyle: { color: C.band }, silent: true, z: 1, tooltip: { show: false }, smooth: 0.15,
+      },
+      { id: "upper", name: nombreBanda, type: "line", data: upperData, symbol: "none", smooth: 0.15, z: 2, silent: true,
+        lineStyle: { width: 1, color: C.bound, type: [3, 3] } },
+      { id: "lower", name: nombreBanda, type: "line", data: lowerData, symbol: "none", smooth: 0.15, z: 2, silent: true,
+        lineStyle: { width: 1, color: C.bound, type: [3, 3] } },
+      { // Pronóstico
+        id: "pred", name: "Pronóstico SARIMA", type: "line", data: predLine, smooth: 0.15, z: 4,
+        showSymbol: predData.length <= 24, symbol: "circle", symbolSize: 6,
+        lineStyle: { width: 2.6, color: C.pred, shadowColor: "rgba(34,211,238,.45)", shadowBlur: 10 },
+        itemStyle: { color: "#0b1226", borderColor: C.pred, borderWidth: 2 },
+        emphasis: { scale: 1.4 },
+        markArea: Number.isFinite(tObs) && Number.isFinite(tFin) ? {
+          silent: true,
+          itemStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(167,139,250,.07)" }, { offset: 1, color: "rgba(167,139,250,0)" }] } },
+          label: { show: true, position: "insideTop", color: "#a78bfa", fontSize: 11, fontWeight: 600, formatter: "Horizonte de pronóstico", distance: 8 },
+          data: [[{ xAxis: tObs }, { xAxis: tFin }]],
+        } : undefined,
+      },
+    );
+  }
+
+  const tooltipFormatter = params => {
+    const arr = Array.isArray(params) ? params : [params];
+    if (!arr.length) return "";
+    const t = typeof arr[0].axisValue === "number" ? arr[0].axisValue : Number(arr[0].value && arr[0].value[0]);
+    const h = histMap.get(t), p = predMap.get(t);
+    if (!h && !p) return "";
+    const row = (color, label, val, strong) =>
+      `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;min-width:220px;margin-top:6px">
+         <span style="display:flex;align-items:center;gap:8px;color:#9aa3b8"><i style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></i>${label}</span>
+         <b style="color:${strong ? "#fff" : "#cfd6e4"};font-weight:${strong ? 650 : 500};font-variant-numeric:tabular-nums">${val}</b></div>`;
+    let html = `<div style="font-size:12px;color:#9aa3b8;text-transform:capitalize">${esc(fFull(t))}</div>`;
+    if (h){
+      html += `<div style="font-size:11px;color:#8db4ff;font-weight:600;margin-top:8px;letter-spacing:.04em">DATO REAL</div>`;
+      html += row(C.hist, "Consumo registrado", n2(h.valor), true);
+    }
+    if (p){
+      html += `<div style="font-size:11px;color:#67e8f9;font-weight:600;margin-top:8px;letter-spacing:.04em">PRONÓSTICO SARIMA</div>`;
+      html += row(C.pred, "Valor estimado", n2(p.prediccion), true);
+      html += row(C.bound, "Límite superior", n2(p.limite_superior));
+      html += row(C.bound, "Límite inferior", n2(p.limite_inferior));
+      html += `<div style="font-size:11px;color:#646d84;margin-top:6px">Intervalo de confianza del ${confPct} %</div>`;
+    }
+    return html;
+  };
+
+  const muchos = c.hist.length + c.pred.length > 120;
+  chart.setOption({
+    backgroundColor: "transparent",
+    animation: true, animationDuration: 900, animationEasing: "cubicOut", animationDurationUpdate: 600,
+    textStyle: { fontFamily: getComputedStyle(document.body).fontFamily },
+    grid: { left: 64, right: 28, top: 56, bottom: muchos ? 78 : 56, containLabel: false },
+    legend: {
+      top: 8, left: 8, icon: "roundRect", itemWidth: 14, itemHeight: 4, itemGap: 20,
+      textStyle: { color: C.text, fontSize: 12 },
+      data: predData.length ? ["Histórico real", "Pronóstico SARIMA", { name: nombreBanda, icon: "rect", itemStyle: { color: "rgba(34,211,238,.35)" } }] : ["Histórico real"],
+      inactiveColor: "#3a4152",
+    },
+    tooltip: {
+      trigger: "axis", confine: true, formatter: tooltipFormatter,
+      backgroundColor: "rgba(10,15,31,.94)", borderColor: "rgba(255,255,255,.1)", borderWidth: 1, padding: [12, 14],
+      extraCssText: "border-radius:14px;box-shadow:0 18px 40px -12px rgba(0,0,0,.7);backdrop-filter:blur(12px);",
+      textStyle: { color: "#e8ecf4", fontSize: 12.5 },
+      axisPointer: { type: "line", lineStyle: { color: "rgba(255,255,255,.25)", width: 1 }, label: { show: false } },
+    },
+    xAxis: {
+      type: "time", name: "Hora (Colombia)", nameLocation: "middle", nameGap: 32,
+      nameTextStyle: { color: C.axis, fontSize: 11.5 },
+      axisLine: { lineStyle: { color: "rgba(255,255,255,.12)" } }, axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: {
+        color: C.text, fontSize: 11, hideOverlap: true, margin: 12,
+        formatter: v => bogotaParts(v).hour === 0 ? `{d|${fDay(v)}}` : fHourS(v),
+        rich: { d: { color: "#e8ecf4", fontWeight: 600, fontSize: 11 } },
+      },
+    },
+    yAxis: {
+      type: "value", scale: true, name: prettyField(state.salud && state.salud.field) || "Consumo total",
+      nameLocation: "middle", nameGap: 50, nameTextStyle: { color: C.axis, fontSize: 11.5 },
+      axisLabel: { color: C.text, fontSize: 11, formatter: v => fmtInt.format(v) },
+      splitLine: { lineStyle: { color: C.grid } }, axisLine: { show: false }, axisTick: { show: false },
+    },
+    dataZoom: [
+      { type: "inside", xAxisIndex: 0, filterMode: "none", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false },
+      ...(muchos ? [{ type: "slider", xAxisIndex: 0, height: 18, bottom: 10, filterMode: "none",
+        borderColor: "transparent", backgroundColor: "rgba(255,255,255,.03)", fillerColor: "rgba(79,140,255,.15)",
+        dataBackground: { lineStyle: { color: "rgba(79,140,255,.4)" }, areaStyle: { color: "rgba(79,140,255,.08)" } },
+        selectedDataBackground: { lineStyle: { color: C.hist }, areaStyle: { color: "rgba(79,140,255,.15)" } },
+        handleStyle: { color: "#cfd6e4", borderColor: "transparent" }, moveHandleSize: 0,
+        textStyle: { color: C.axis, fontSize: 10 }, labelFormatter: v => fShort(v) }] : []),
+    ],
+    series,
+  }, { notMerge: true });
+
+  // Pie de la gráfica: datos reales de la respuesta
+  const foot = [];
+  if (c.hist.length) foot.push(`Histórico: <b>${c.hist.length} h</b> desde ${esc(fShort(parseUTC(c.hist[0].tiempo)))}`);
+  if (c.pred.length) foot.push(`Pronóstico: <b>${c.pred.length} h</b> hasta ${esc(fShort(parseUTC(c.pred[c.pred.length - 1].tiempo)))}`);
+  if (c.pred.length) foot.push(`Confianza: <b>${confPct} %</b>`);
+  if (state.ultimaConsulta) foot.push(`Consultado a las <b>${esc(fHour(state.ultimaConsulta))}</b>`);
+  foot.push(`Zoom: Ctrl + rueda del ratón o gesto de pellizco`);
+  $("chartFoot").innerHTML = foot.map(x => `<span>${x}</span>`).join("");
+}
+
+/* =====================================================================
+   Tabla de predicciones
+   ===================================================================== */
+function renderTabla(c){
+  const tb = $("tbody");
+  if (!c.pred.length){
+    tb.innerHTML = `<tr><td colspan="5"><div class="empty">${icon("inbox", 22)}<br>No hay predicciones para mostrar.</div></td></tr>`;
+    $("btnCsv").disabled = true;
+    $("tblSub").textContent = "Valores horarios del pronóstico en hora de Colombia.";
+    return;
+  }
+  const minL = Math.min(...c.pred.map(p => p.limite_inferior));
+  const maxU = Math.max(...c.pred.map(p => p.limite_superior));
+  const span = (maxU - minL) || 1;
+  const pos = v => (((v - minL) / span) * 100).toFixed(2);
+  let html = "", dia = null;
+  c.pred.forEach((p, i) => {
+    const t = parseUTC(p.tiempo);
+    const k = dayKey(t);
+    if (k !== dia){ dia = k; html += `<tr class="day"><td colspan="5">${esc(cap(clean(dtfDayLong.format(t))))}</td></tr>`; }
+    const badges = (i === 0 ? '<span class="badge first">Próxima</span>' : "") + (c.max && p === c.max ? '<span class="badge max">Máximo</span>' : "");
+    html += `<tr class="row" title="Marca original UTC: ${esc(p.tiempo)}">
+      <td data-label="Fecha y hora"><span class="t-hour num">${esc(fHour(t))}</span>${badges}<span class="t-date">${esc(fDay(t))}</span></td>
+      <td data-label="Pronóstico" class="t-pred num">${n2(p.prediccion)}</td>
+      <td data-label="Límite inferior" class="t-bound num">${n2(p.limite_inferior)}</td>
+      <td data-label="Límite superior" class="t-bound num">${n2(p.limite_superior)}</td>
+      <td class="td-bar" style="text-align:left"><div class="rangebar" aria-hidden="true"><i style="left:${pos(p.limite_inferior)}%;right:${(100 - pos(p.limite_superior)).toFixed(2)}%"></i><s style="left:calc(${pos(p.prediccion)}% - 1px)"></s></div></td>
+    </tr>`;
+  });
+  tb.innerHTML = html;
+  $("btnCsv").disabled = false;
+  $("tblSub").textContent = `${c.pred.length} horas pronosticadas · intervalo de confianza del ${fmtInt.format((state.datos.confianza ?? state.confianza) * 100)} %.`;
+}
+
+function exportarCSV(){
+  const d = state.datos;
+  if (!d || !d.prediccion || !d.prediccion.length) return;
+  const filas = [["tiempo_utc", "hora_colombia", "prediccion", "limite_inferior", "limite_superior"]];
+  d.prediccion.forEach(p => filas.push([p.tiempo, dtfCsv.format(parseUTC(p.tiempo)), p.prediccion, p.limite_inferior, p.limite_superior]));
+  const csv = filas.map(r => r.join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `pronostico_${state.horas}h_${Date.now()}.csv` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* =====================================================================
+   Render global y estados de error
+   ===================================================================== */
+function renderTodo(){
+  const d = state.datos;
+  const c = calcular(d);
+  renderKPIs(d, c);
+  renderInsight(d, c);
+  renderDisponibilidad(d);
+  renderChart(d, c);
+  renderTabla(c);
+  renderPillDatos();
+  renderSalud();
+  const banner = $("chartBanner");
+  if (state.modoSoloHistorico && state.errorDatos){
+    banner.className = "banner warn show";
+    banner.innerHTML = `${icon("alert", 16)}<span><b>No se pudo generar el pronóstico.</b> ${esc(state.errorDatos.message)} Se muestra únicamente el histórico real.</span>`;
+  } else if ((Number(d.horas_rellenadas) || 0) > 0){
+    banner.className = "banner warn show";
+    banner.innerHTML = `${icon("info", 16)}<span>La serie tenía huecos: el backend rellenó ${fmtInt.format(d.horas_rellenadas)} ${Number(d.horas_rellenadas) === 1 ? "hora" : "horas"} por interpolación antes de pronosticar.</span>`;
+  } else {
+    banner.className = "banner"; banner.innerHTML = "";
+  }
+}
+
+function renderErrorDatos(e){
+  const sinConexion = e.status === 0;
+  const titulo = sinConexion ? "Sin conexión con el backend"
+    : e.status === 503 ? "Servicio no disponible"
+    : e.status === 502 ? "Error al consultar InfluxDB"
+    : e.status === 404 ? "Sin datos en InfluxDB"
+    : e.status === 422 ? "Parámetros no válidos"
+    : "No se pudo obtener el pronóstico";
+  const codigo = e.status ? ` (HTTP ${e.status})` : "";
+  const banner = $("chartBanner");
+
+  if (state.datos){
+    // Conservamos la última vista válida y avisamos que no corresponde a los parámetros actuales.
+    banner.className = "banner err show";
+    banner.innerHTML = `${icon("alert", 16)}<span><b>${esc(titulo)}${codigo}.</b> ${esc(e.message)} Se conserva la última consulta correcta.</span>`;
+  } else {
+    banner.className = "banner"; banner.innerHTML = "";
+    if (chart) chart.clear();
+    mostrarOverlay("err", sinConexion ? "wifiOff" : "alert", titulo + codigo, e.message, true);
+    ["kLast","kNext","kMax","kVar","kObs"].forEach(k => setKpi(k, "N/D"));
+    ["kLastDesc","kNextDesc","kMaxDesc","kVarDesc","kObsDesc"].forEach(k => { $(k).textContent = "Datos no disponibles."; });
+    $("kSpark").innerHTML = "";
+    $("insightText").textContent = "No hay información para interpretar todavía. Revisa el estado del sistema más abajo.";
+    $("tbody").innerHTML = `<tr><td colspan="5"><div class="empty">${icon("alert", 22)}<br>${esc(e.message)}</div></td></tr>`;
+    $("btnCsv").disabled = true;
+  }
+  $("availBox").innerHTML = `<span class="dot err"></span><div><strong>${esc(titulo)}</strong><span>${esc(e.message)}</span></div>`;
+  renderPillDatos();
+  renderSalud();
+}
+
+/* =====================================================================
+   /api/salud
+   ===================================================================== */
+let saludEnCurso = null;
+async function cargarSalud(){
+  if (saludEnCurso) return saludEnCurso;
+  const t0 = performance.now();
+  saludEnCurso = (async () => {
+    try {
+      const s = await fetchJSON(API.salud, { timeoutMs: 10000 });
+      state.salud = s; state.saludError = null;
+      state.saludLatencia = Math.round(performance.now() - t0);
+    } catch (e){
+      state.saludError = e; state.saludLatencia = null;
+    } finally {
+      state.saludRevisada = Date.now();
+      renderSalud();
+      saludEnCurso = null;
+    }
+  })();
+  return saludEnCurso;
+}
+
+function renderSalud(){
+  const s = state.salud, err = state.saludError;
+  // Barra superior: API
+  if (err) setPill("pillApi", "err", "API", "Sin conexión", err.message);
+  else if (s) setPill("pillApi", s.estado === "ok" ? "ok" : "warn", "API", s.estado === "ok" ? "En línea" : String(s.estado),
+    `Respuesta de /api/salud en ${state.saludLatencia} ms`);
+  // Barra superior: Modelo
+  if (err && !s) setPill("pillModel", "wait", "Modelo", "Desconocido", "No se pudo consultar /api/salud");
+  else if (s){
+    if (!s.modelo_cargado) setPill("pillModel", "err", "Modelo", "No cargado", "No hay models/sarima_config.json cargado");
+    else if (s.modelo_demo) setPill("pillModel", "warn", "Modelo", "SARIMA demo", "Modelo de demostración (crear_modelo_demo.py)");
+    else setPill("pillModel", "ok", "Modelo", "SARIMA activo", "Modelo entrenado cargado en el backend");
+  }
+  // Overview: measurement y field reales
+  if (s){
+    if (s.measurement){ $("ovMeasurement").textContent = s.measurement; $("chipMeasurement").textContent = s.measurement; }
+    if (s.field){ $("chipField").textContent = s.field; $("ovTitle").textContent = prettyField(s.field); }
+  }
+
+  const grid = $("healthGrid");
+  const cell = (ic, nombre, dot, valor, nota, mono) => `<div class="hcell">
+      <div class="hcell-top">${icon(ic, 16)} ${esc(nombre)}</div>
+      <div class="hcell-val"><span class="dot ${dot}"></span>${mono ? `<code>${esc(valor)}</code>` : esc(valor)}</div>
+      <p>${nota}</p></div>`;
+  if (!s && !err){
+    grid.innerHTML = Array.from({ length: 5 }, () => '<div class="hcell"><span class="sk sk-line" style="width:60%"></span><span class="sk sk-line" style="height:20px"></span><span class="sk sk-line" style="width:80%"></span></div>').join("");
+    return;
+  }
+  const revisado = state.saludRevisada ? `Verificado a las ${esc(clean(dtfClock.format(state.saludRevisada)))}` : "";
+  if (err){
+    grid.innerHTML =
+      cell("server", "Disponibilidad de la API", "err", "Sin respuesta", `${esc(err.message)}${err.status ? ` (HTTP ${err.status})` : ""}. ${fin(revisado)}`) +
+      (s ? "" : cell("database", "InfluxDB", "wait", "Desconocido", "Se requiere respuesta de /api/salud.") +
+                cell("cpu", "Modelo predictivo", "wait", "Desconocido", "Se requiere respuesta de /api/salud.") +
+                cell("layers", "Tipo de modelo", "wait", "Desconocido", "Se requiere respuesta de /api/salud.") +
+                cell("box", "Proceso que atiende", "wait", "Desconocido", "Se requiere respuesta de /api/salud."));
+    $("hSub").innerHTML = `No se pudo consultar <code>/api/salud</code>. Se reintentará en 30 segundos.`;
+    return;
+  }
+  $("hSub").innerHTML = `Información de <code>/api/salud</code>. Se verifica cada 30 segundos.`;
+
+  // InfluxDB: la API informa configuración; la conexión efectiva se deduce de la última consulta de datos.
+  let iDot, iVal, iNota;
+  if (s.modo_demo){
+    iDot = "warn"; iVal = "Modo demo";
+    iNota = "DEMO_MODE activo: la API genera datos sintéticos en lugar de consultar InfluxDB.";
+  } else if (!s.influx_configurado){
+    iDot = "err"; iVal = "Sin configurar";
+    iNota = "Faltan variables de entorno de InfluxDB (URL, token, org, bucket, measurement o field).";
+  } else if (state.errorDatos && (state.errorDatos.status === 502 || state.errorDatos.status === 404) && !state.modoSoloHistorico){
+    iDot = "err"; iVal = "Error de consulta";
+    iNota = `Credenciales configuradas, pero la última consulta falló: ${esc(state.errorDatos.message)}`;
+  } else if (state.ultimaConsulta){
+    iDot = "ok"; iVal = "Conectado";
+    iNota = `Credenciales configuradas y última consulta de datos correcta (${esc(relTime(state.ultimaConsulta))}).`;
+  } else {
+    iDot = "ok"; iVal = "Configurado";
+    iNota = "Credenciales presentes. La conexión se confirma con la primera consulta de datos.";
+  }
+  const serie = [s.measurement, s.field].filter(Boolean).map(esc).join(" · ");
+
+  grid.innerHTML =
+    cell("server", "Disponibilidad de la API", s.estado === "ok" ? "ok" : "warn", s.estado === "ok" ? "Operativa" : String(s.estado),
+      `${state.saludLatencia != null ? `Latencia ${state.saludLatencia} ms. ` : ""}${fin(revisado)}`) +
+    cell("database", "InfluxDB", iDot, iVal, iNota + (serie ? `<br>Serie: ${serie}` : "")) +
+    cell("cpu", "Carga del modelo", s.modelo_cargado ? "ok" : "err", s.modelo_cargado ? "Cargado" : "No cargado",
+      s.modelo_cargado ? "El backend tiene un modelo SARIMA listo para pronosticar." : "Sube models/sarima_config.json o recarga el modelo.") +
+    cell("layers", "Tipo de modelo", !s.modelo_cargado ? "wait" : s.modelo_demo ? "warn" : "ok",
+      !s.modelo_cargado ? "Sin modelo" : s.modelo_demo ? "Modelo demo" : "Modelo real",
+      !s.modelo_cargado ? "No hay modelo para clasificar." : s.modelo_demo ? "Generado por crear_modelo_demo.py con datos sintéticos." : "Entrenado en Colab con datos reales del sensor.") +
+    cell("box", "Proceso que atiende", s.atendido_por ? "ok" : "wait", s.atendido_por || "N/D",
+      "Nombre del host. En Docker coincide con el CONTAINER ID de <code>docker ps</code>.", true);
+}
+
+/* =====================================================================
+   /api/modelo
+   ===================================================================== */
+async function cargarModelo(){
+  try {
+    state.modelo = await fetchJSON(API.modelo, { timeoutMs: 15000 });
+    state.modeloError = null;
+  } catch (e){
+    state.modelo = null; state.modeloError = e;
+  }
+  renderModelo();
+}
+
+function renderModelo(){
+  const body = $("modelBody");
+  const m = state.modelo;
+  if (!m){
+    const e = state.modeloError;
+    body.innerHTML = `<div class="state-box err" style="padding:24px 0;text-align:center;max-width:none">
+      <div class="state-ico">${icon(e && e.status === 0 ? "wifiOff" : "alert", 22)}</div>
+      <h3>${e && e.status === 503 ? "No hay modelo cargado" : "Información no disponible"}</h3>
+      <p>${esc(e ? e.message : "Sin respuesta de /api/modelo.")}</p>
+      <button class="btn" type="button" id="btnModelRetry">${icon("refresh", 15)} Reintentar</button></div>`;
+    $("btnModelRetry").addEventListener("click", cargarModelo);
+    return;
+  }
+  const o = Array.isArray(m.order) ? m.order : null;
+  const so = Array.isArray(m.seasonal_order) ? m.seasonal_order : null;
+  $("chipModel").textContent = so && so[3] ? "SARIMA" : "ARIMA";
+  let html = "";
+
+  if (o){
+    const formula = so ? `SARIMA(${o.join(",")})(${so.slice(0, 3).join(",")})<sub style="font-size:.7em">${esc(so[3])}</sub>` : `ARIMA(${o.join(",")})`;
+    html += `<div class="model-formula">${formula}<small>Órdenes reportadas por el backend${m.trend ? ` · tendencia: ${esc(m.trend)}` : " · sin término de tendencia"}</small></div>`;
+    const ords = [["p", o[0], "AR"], ["d", o[1], "I"], ["q", o[2], "MA"]];
+    if (so) ords.push(["P", so[0], "SAR"], ["D", so[1], "SI"], ["Q", so[2], "SMA"], ["s", so[3], "per."]);
+    html += `<div><p class="sub-h">Órdenes del modelo</p><div class="orders" style="grid-template-columns:repeat(${ords.length},minmax(0,1fr))">${
+      ords.map(([k, v, l]) => `<div class="ord${k === "s" ? " s" : ""}" title="${esc({AR:"Autorregresivo",I:"Diferenciación",MA:"Media móvil",SAR:"Autorregresivo estacional",SI:"Diferenciación estacional",SMA:"Media móvil estacional","per.":"Periodo estacional"}[l] || l)}"><b class="num">${esc(v)}</b><span>${k} · ${esc(l)}</span></div>`).join("")}</div></div>`;
+  }
+
+  const met = m.metricas_test;
+  const desc = { MAE: "Error absoluto medio", RMSE: "Raíz del error cuadrático medio", "MAPE_%": "Error porcentual absoluto medio" };
+  html += `<div><p class="sub-h">Métricas de evaluación (conjunto de prueba)</p>`;
+  if (met && typeof met === "object" && Object.keys(met).length){
+    html += `<div class="metrics">${Object.entries(met).map(([k, v]) => {
+      const pct = /%/.test(k);
+      const label = k.replace("_%", "").replace("_", " ");
+      const val = typeof v === "number" ? `${n2(v)}${pct ? " %" : ""}` : esc(v);
+      return `<div class="metric"><span>${esc(label)}</span><b class="num">${val}</b><small>${esc(desc[k] || "")}</small></div>`;
+    }).join("")}</div>`;
+  } else {
+    html += `<div class="muted-note">El modelo cargado no reporta métricas de prueba${state.salud && state.salud.modelo_demo ? " (es el modelo demo)" : ""}.</div>`;
+  }
+  html += `</div>`;
+
+  const kv = [];
+  const tEnt = parseLooseUTC(m.entrenado_en);
+  if (m.entrenado_en != null) kv.push(["Fecha de entrenamiento", Number.isFinite(tEnt) ? fFull(tEnt) : String(m.entrenado_en)]);
+  if (m.n_observaciones != null) kv.push(["Observaciones de entrenamiento", `${fmtInt.format(m.n_observaciones)} horas`]);
+  if (m.rango_entrenamiento && typeof m.rango_entrenamiento === "object"){
+    const a = parseLooseUTC(m.rango_entrenamiento.inicio), b = parseLooseUTC(m.rango_entrenamiento.fin);
+    kv.push(["Rango de entrenamiento", `${Number.isFinite(a) ? fShort(a) : esc(m.rango_entrenamiento.inicio)} a ${Number.isFinite(b) ? fShort(b) : esc(m.rango_entrenamiento.fin)}`]);
+  }
+  if (m.measurement || m.field) kv.push(["Serie", [m.measurement, m.field].filter(Boolean).join(" · ")]);
+  if (m.versiones && typeof m.versiones === "object")
+    kv.push(["Librerías", Object.entries(m.versiones).map(([k, v]) => `${k} ${v}`).join(" · ")]);
+  if (kv.length)
+    html += `<div><p class="sub-h">Entrenamiento</p><dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl></div>`;
+
+  body.innerHTML = html;
+}
+
+/* =====================================================================
+   Arranque
+   ===================================================================== */
+function iniciar(){
+  hydrateIcons();
+  tickClock(); setInterval(tickClock, 1000);
+  initControls();
+  initChart();
+  renderSalud();                 // skeletons del estado
+  cargarSalud();
+  cargarModelo();
+  cargarPrediccion();
+
+  // Verificación periódica de salud (pausada si la pestaña no está visible)
+  setInterval(() => { if (!document.hidden) cargarSalud(); }, HEALTH_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) cargarSalud(); });
+  // Refresca los textos relativos ("hace X min") cada minuto sin pedir datos nuevos
+  setInterval(() => { if (state.datos) { renderPillDatos(); const t = parseUTC(state.datos.ultima_observacion);
+    if (Number.isFinite(t)) $("kObsDesc").innerHTML = `Inicio de la última hora completa · <b>${esc(relTime(t))}</b>`; } }, 60000);
+}
+document.addEventListener("DOMContentLoaded", iniciar);
 </script>
 </body>
 </html>
